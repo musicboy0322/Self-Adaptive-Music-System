@@ -1,0 +1,6 @@
+Pipfile
+Pipfile.lock
+.env
+datasets
+jmeter.log
+.DS_Store
