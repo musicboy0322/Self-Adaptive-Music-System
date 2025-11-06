@@ -76,8 +76,6 @@ def main():
         # Saturation
         ("cpu.quota.used.percent", "avg"),
         ("memory.limit.used.percent", "avg"),
-        # Other
-        ("jvm.gc.global.time", "avg"),
     ]
 
     # Initialize CSV file
