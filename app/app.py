@@ -82,8 +82,6 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3000",
-        "https://localhost:3000",
         "*"
     ],
     allow_credentials=True,
@@ -334,8 +332,6 @@ async def create_room(
     """
     # Only allow requests from localhost
     client_ip = request.client.host
-    if client_ip != "127.0.0.1":
-        raise HTTPException(status_code=403, detail="Forbidden: Internal use only")
 
     if not room_manager.can_create_room():
         raise HTTPException(status_code=403, detail="Forbidden: Reached maximum room limit")
@@ -362,8 +358,6 @@ async def join_room(request_object: Request, request: JoinRoomRequest):
     """Join an existing room"""
     # Only allow requests from localhost
     client_ip = request_object.client.host
-    if client_ip != "127.0.0.1":
-        raise HTTPException(status_code=403, detail="Forbidden: Internal use only")
 
     room = room_manager.join_room(
         room_id=request.room_id,
@@ -430,8 +424,6 @@ async def leave_room(request: Request, room_id: str, user_id: str = Query(...)):
     """Leave a room"""
     # Only allow requests from localhost
     client_ip = request.client.host
-    if client_ip != "127.0.0.1":
-        raise HTTPException(status_code=403, detail="Forbidden: Internal use only")
 
     success = room_manager.leave_room(room_id, user_id)
     if not success:
@@ -505,8 +497,6 @@ async def add_song_to_queue(room_id: str, request: AddSongRequest, user_id: str 
     """Add a song to the queue, only for internal calls (called by line_bot.py)"""
     # Only allow requests from localhost
     client_ip = request_object.client.host
-    if client_ip != "127.0.0.1":
-        raise HTTPException(status_code=403, detail="Forbidden: Internal use only")
 
     room = room_manager.get_room(room_id)
     if not room:
