@@ -556,3 +556,20 @@ class RoomManager:
             self.cleanup_timers[room_id].cancel()
             self.cleanup_timers.pop(room_id, None)
             logger.info(f"Cancelled cleanup timer for room {room_id}")
+
+    def clear_all_rooms(self):
+        """Clear all rooms and related state immediately."""
+        for room_id, room in list(self.rooms.items()):
+            self.cancel_pause_timer(room_id)
+            self.cancel_cleanup_timer(room_id)
+
+            for member in room.members:
+                self.user_rooms.pop(member.user_id, None)
+
+            logger.info(f"Deleted room {room_id} ({len(room.members)} members)")
+
+        self.rooms.clear()
+        self.pause_timers.clear()
+        self.cleanup_timers.clear()
+        self.cleanup_timers.clear()
+        logger.info("All rooms cleared successfully.")

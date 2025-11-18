@@ -453,6 +453,16 @@ async def leave_room(request: Request, room_id: str, user_id: str = Query(...)):
 
     return {"message": "Left room successfully"}
 
+@app.delete("/api/room/reset")
+async def reset_all_rooms():
+    """Clear all rooms and related background tasks (for testing)."""
+    try:
+        room_manager.clear_all_rooms()
+        logger.info("All rooms cleared via /api/rooms/reset")
+        return {"message": "All rooms cleared", "active_rooms": len(room_manager.rooms)}
+    except Exception as e:
+        logger.error(f"Error clearing rooms: {e}")
+        raise HTTPException(status_code=500, detail="Failed to clear rooms")
 
 @app.post("/api/room/{room_id}/autoplay/toggle")
 async def toggle_autoplay(room_id: str):
