@@ -6,14 +6,14 @@ import tempfile
 from datetime import datetime, timedelta
 from typing import Dict, Set, Optional
 import time
+import random
 
 import yt_dlp
 
 logger = logging.getLogger(__name__)
 
-
 class AudioCacheManager:
-    def __init__(self, max_cache_size_mb: int, cache_duration_hours: int, audio_quality_kbps: int, loudness_normalization: bool):
+    def __init__(self, max_cache_size_mb: int, cache_duration_hours: int, audio_quality_kbps: int, loudness_normalization: bool, song_quality_profiles: Dict[str, Dict[str, Any]], song_quality: str):
         self.cache_dir = tempfile.mkdtemp(prefix="cartunes_audio_")
         self.cached_files: Dict[
             str, dict] = {}  # video_id -> {path, downloaded_at, last_ordered_at, size}
@@ -23,6 +23,11 @@ class AudioCacheManager:
         self.audio_quality = str(audio_quality_kbps)
         self.loudness_normalization = loudness_normalization
         self.ffmpeg_path = shutil.which('ffmpeg')
+        self.song_quality = song_quality
+        self.song_quality_profiles = song_quality_profiles
+        self.cache_hits = 0
+        self.cache_misses = 0
+        self.download_time = []
         if self.ffmpeg_path:
             logger.warning(f"Found ffmpeg at: {self.ffmpeg_path}")
         else:
@@ -39,14 +44,16 @@ class AudioCacheManager:
             file_info = self.cached_files[video_id]
             file_path = file_info['path']
 
-            # Check if file still exists and not expired (based on last_ordered_at)
+            # 命中有效快取
             if (os.path.exists(file_path) and
                     datetime.now() - file_info['last_ordered_at'] < self.cache_duration):
+                self.cache_hits += 1   # ✅ 記錄 hit
                 return file_path
             else:
-                # Remove expired/missing file from cache
                 self._remove_from_cache(video_id)
 
+        # 如果走到這裡，代表 miss
+        self.cache_misses += 1        # ✅ 記錄 miss
         return None
 
     def is_downloading(self, video_id: str) -> bool:
@@ -59,29 +66,42 @@ class AudioCacheManager:
             self.cached_files[video_id]['last_ordered_at'] = datetime.now()
             logger.debug(f"Refreshed cache timer for {video_id}")
 
-    async def download_audio(self, video_id: str, priority: bool = False) -> Optional[str]:
-        """Download audio file and return local path"""
+    async def download_audio(self, video_id: str, song_quality: str, priority: bool = False) -> Optional[str]:
+        """Simulate audio download based on quality profile."""
         start_time = time.time()
+
         if video_id in self.download_events:
-            # Wait for ongoing download
             await self.download_events[video_id].wait()
-            # Refresh timer since this is a new request for the same song
             self.refresh_cache_timer(video_id)
             return self.get_cache_path(video_id)
 
-        # Check if already cached
         cached_path = self.get_cache_path(video_id)
         if cached_path:
-            # Refresh timer since this song is being requested again
             self.refresh_cache_timer(video_id)
             return cached_path
 
         self.download_events[video_id] = asyncio.Event()
         try:
-            file = await self._download_file(video_id)
+            # === 模擬不同音質下載時間 ===
+            profile = self.song_quality_profiles[song_quality]
+            avg_download_time_range = profile["avg_download_time_range"]
+            random_time = random.uniform(*avg_download_time_range)
+            await asyncio.sleep(random_time)
+
+            current_time = datetime.now()
+            self.cached_files[video_id] = {
+                'path': f"{video_id}_song",
+                'downloaded_at': current_time,
+                'last_ordered_at': current_time,
+                'size': profile["file_size_mb"]
+            }
+
             end_time = time.time()
-            print(f"下載耗時：{end_time - start_time:.2f} 秒")
-            return file
+            elapsed = end_time - start_time
+            self.download_time.append(elapsed)
+
+            logger.info(f"[Mock Download] {video_id} downloaded in {elapsed:.2f}s ({song_quality})")
+            return f"{video_id}_song"
         finally:
             self.download_events[video_id].set()
             del self.download_events[video_id]
@@ -226,12 +246,12 @@ class AudioCacheManager:
 
             del self.cached_files[video_id]
 
-    async def preload_queue_songs(self, video_ids: list):
+    async def preload_queue_songs(self, video_ids: list, song_quality: str, preload_song: int):
         """Preload upcoming songs in background"""
-        for video_id in video_ids[:5]:  # Only preload next 5 songs
+        for video_id in video_ids[:preload_song]:  # Only preload next 5 songs
             if not self.get_cache_path(video_id) and not self.is_downloading(video_id):
                 # Download in background without waiting
-                asyncio.create_task(self.download_audio(video_id))
+                asyncio.create_task(self.download_audio(video_id, song_quality))
 
     def cleanup_all(self):
         """Clean up all cached files and temp directory"""
@@ -241,3 +261,42 @@ class AudioCacheManager:
                 logger.info(f"Cleaned up audio cache directory: {self.cache_dir}")
         except Exception as e:
             logger.error(f"Error cleaning up cache directory: {e}")
+        
+    def set_max_cache_size(self, new_size_mb: int):
+        """Dynamically adjust maximum cache size (in MB)."""
+        old_size = self.max_cache_size_mb
+        self.max_cache_size_mb = new_size_mb
+        logger.info(f"[Adaptive] Cache size adjusted from {old_size}MB to {new_size_mb}MB")
+    
+    def get_download_time(self):
+        result = self.download_time
+        self.download_time.clear()
+        return result
+
+    def set_song_quailty(self, song_quality: str):
+        self.song_quality = song_quality
+    
+    def get_song_quality(self):
+        return self.song_quality
+
+    def get_total_cache_usage(self) -> float:
+        """Return current cache usage ratio (0.0 ~ 1.0)."""
+        if self.max_cache_size_mb <= 0:
+            return 0.0 
+        current = self._get_total_cache_size_mb()
+        return round(current / self.max_cache_size_mb, 4)
+    
+    def get_cache_hit_and_miss(self) -> [int, int]:
+        return (self.cache_hits, self.cache_misses)
+    
+    def record_playback_latency(self, latency: float):
+        if not hasattr(self, "playback_latencies"):
+            self.playback_latencies = []
+        self.playback_latencies.append(latency)
+
+    def get_playback_latency(self):
+        if not hasattr(self, "playback_latencies") or not self.playback_latencies:
+            return 0.0
+        result = self.playback_latencies
+        self.playback_latencies.clear()
+        return result

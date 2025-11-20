@@ -31,7 +31,8 @@ config = utils.read_config()
 room_manager = RoomManager(config['maximum_room'])
 ws_manager = ConnectionManager()
 audio_cache_manager = AudioCacheManager(config['max_cache_size_mb'], config['cache_duration_hours'], 
-                                        config['audio_quality_kbps'], config['loudness_normalization'])
+                                        config['audio_quality_kbps'], config['loudness_normalization'],
+                                        config['song_quality_profiles'], "medium")
 
 # Dictionary to store the last request time for each room and action, for throttling
 # Used for playback control, skipping, and autoplay toggling
@@ -48,6 +49,9 @@ pinging_tasks: Dict[str, asyncio.Task] = {}
 
 background_tasks = set()
 
+# Application level metrcis
+play_request_start: Dict[str, float] = {}
+preload_song = config['preload_song']
 
 # App lifespan manager
 @asynccontextmanager
@@ -89,6 +93,71 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ===== Self-adaptive Endpoint =====
+@app.get("/api/metrics")
+async def get_metrics():
+    """get current metrics"""
+    return {
+        "cache_usage": audio_cache_manager.get_total_cache_usage(),
+        "cache_hit_ratio": audio_cache_manager.get_cache_hit_and_miss(),
+        "avg_playback_latency": audio_cache_manager.get_playback_latency(),
+        "avg_download_time": audio_cache_manager.get_download_time()
+    }
+
+@app.post("/api/config/update")
+async def update_config(
+    changed_cache_size: Optional[int] = Query(None),
+    changed_preload_song: Optional[int] = Query(None),
+    changed_song_quality: Optional[str] = Query(None),
+):
+    """
+    Dynamically update adaptive configuration.
+    Each parameter is optional — only provided ones will be updated.
+    """
+    global preload_song
+    changes = {}
+
+    # === 1. Cache size ===
+    if changed_cache_size is not None:
+        try:
+            old_cache = audio_cache_manager.max_cache_size_mb
+            audio_cache_manager.set_max_cache_size(changed_cache_size)
+            logger.info(f"[Adaptive] Cache size updated from {old_cache}MB to {changed_cache_size}MB")
+            changes["cache_size_mb"] = {"old": old_cache, "new": changed_cache_size}
+        except Exception as e:
+            logger.error(f"Failed to update cache size: {e}")
+            raise HTTPException(status_code=500, detail="Failed to update cache size")
+
+    # === 2. Preload songs ===
+    if changed_preload_song is not None:
+        try:
+            old_preload_song = preload_song
+            preload_song = changed_preload_song
+            logger.info(f"[Adaptive] Preload songs updated from {old_preload_song} to {preload_song}")
+            changes["preload_song"] = {"old": old_preload_song, "new": preload_song}
+        except Exception as e:
+            logger.error(f"Failed to update preload songs: {e}")
+            raise HTTPException(status_code=500, detail="Failed to update preload songs")
+
+    # === 3. Song quality ===
+    if changed_song_quality is not None:
+        try:
+            old_song_quality = audio_cache_manager.get_song_quality()
+            audio_cache_manager.set_song_quailty(changed_song_quality)
+            song_quality = changed_song_quality
+            logger.info(f"[Adaptive] Song quality updated from {old_song_quality} to {song_quality}")
+            changes["song_quality"] = {"old": old_song_quality, "new": song_quality}
+        except Exception as e:
+            logger.error(f"Failed to update song quality: {e}")
+            raise HTTPException(status_code=500, detail="Failed to update song quality")
+
+    if not changes:
+        return {"message": "No parameters provided — nothing changed."}
+
+    return {
+        "message": "Adaptive configuration updated successfully",
+        "changes": changes
+    }
 
 # ===== Background Tasks =====
 
@@ -167,28 +236,37 @@ async def get_audio_status(video_id: str, room_id: str = Query(None)):
     """Get the download status of an audio file"""
     logger.info(f"Status check requested for video {video_id}, room {room_id}")
 
+    if video_id not in play_request_start:
+        play_request_start[video_id] = time.time()
+
     if audio_cache_manager.is_downloading(video_id):
         logger.info(f"Video {video_id} is downloading")
         return {"status": "downloading", "is_downloading": True}
+
     elif audio_cache_manager.get_cache_path(video_id):
-        # If room_id provided and audio is ready, start playback
         logger.info(f"Video {video_id} is ready")
+
+        latency = None
+        if video_id in play_request_start:
+            latency = time.time() - play_request_start.pop(video_id)
+            audio_cache_manager.record_playback_latency(latency)
+            logger.info(f"[Metrics] Playback latency for {video_id}: {latency:.3f}s")
+
         if room_id:
             started = room_manager.start_audio_ready_playback(room_id, video_id)
             if started:
-                # Broadcast the playback state change
-                logger.info(f"Started playback for room {room_id}")
-
                 await ws_manager.broadcast_playback_state(
                     room_id,
                     True,
                     -abs(config['song_start_delay_seconds'])
                 )
 
-        return {"status": "ready", "is_downloading": False}
+        return {"status": "ready", "latency": latency, "is_downloading": False}
+
     else:
         logger.info(f"Video {video_id} not found")
         raise HTTPException(status_code=404, detail="Audio not found or not yet initiated download")
+
 
 
 @app.get("/api/stream/{video_id}")
@@ -300,7 +378,7 @@ async def audio_preloader():
                 room = room_manager.get_room(room_id)
                 if room and room.queue:
                     # Get top 5 video IDs of upcoming songs from queue
-                    upcoming_video_ids = [song.video_id for song in room.queue[:5]]
+                    upcoming_video_ids = [song.video_id for song in room.queue[:preload_song]]
 
                     # Also preload top 3 songs from autoplay_playlist
                     if room.autoplay_playlist:
@@ -505,8 +583,6 @@ async def toggle_autoplay(room_id: str):
 async def add_song_to_queue(room_id: str, request: AddSongRequest, user_id: str = Query(...),
                             user_name: str = Query(...), request_object: Request = Request):
     """Add a song to the queue, only for internal calls (called by line_bot.py)"""
-    # Only allow requests from localhost
-    client_ip = request_object.client.host
 
     room = room_manager.get_room(room_id)
     if not room:
@@ -521,10 +597,6 @@ async def add_song_to_queue(room_id: str, request: AddSongRequest, user_id: str 
         'duration': request.duration,
         'thumbnail': request.thumbnail
     }
-
-    # Basic validation only, since we did it already in line_bot.py
-    if not song_data['title']:
-        raise HTTPException(status_code=400, detail="Invalid song data")
 
     # Refresh cache timer if song already exists in cache
     audio_cache_manager.refresh_cache_timer(request.video_id)
@@ -563,17 +635,16 @@ async def add_song_to_queue(room_id: str, request: AddSongRequest, user_id: str 
             await ws_manager.broadcast_song_added(room_id, song.dict())
 
     # Start preloading in background (non-blocking)
-    upcoming_video_ids = [s.video_id for s in room.queue[:5]]
+    upcoming_video_ids = [s.video_id for s in room.queue[:preload_song]]
     if room.current_song:
         upcoming_video_ids.insert(0, room.current_song.video_id)
-    asyncio.create_task(audio_cache_manager.preload_queue_songs(upcoming_video_ids))
+    asyncio.create_task(audio_cache_manager.preload_queue_songs(upcoming_video_ids, preload_song))
 
     return AddSongResponse(
         message="Song added to queue",
         song=song.dict(),
         queue_length=len(room.queue)
     )
-
 
 @app.get("/api/room/{room_id}/queue", response_model=QueueResponse)
 async def get_queue(room_id: str):
@@ -879,7 +950,6 @@ async def get_user_current_room(user_id: str):
             autoplay=room.autoplay
         )
     }
-
 
 # ===== WebSocket Endpoint =====
 
