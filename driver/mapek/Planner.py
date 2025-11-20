@@ -9,32 +9,50 @@ class Planner:
         self.min_memory = resources_limitations["single"]["min_memory"]
         self.max_memory = resources_limitations["single"]["max_memory"]
         self.roi_threshold = roi
-    
+        self.baseline_resources = resources
+
     def _decide_action(self, analysis_result, config, svc):
         if not analysis_result or "adaptation" not in analysis_result:
             print("Warning: Unexpected behavior")
             return None, None
     
-        new_config = copy.deepcopy(config)  # Don't modify original
-        adaptations = []
-        system_situation = analysis_result["adaptation"]
+        base_adaptation = analysis_result["adaptation"]
+        unhealthy_metrics = analysis_result["unhealthy_metrics"]
         overall_utility = analysis_result["overall_utility"]
 
-        print(f'''{svc}: {system_situation}''')
-        print(analysis_result["unhealthy_metrics"])
+        if base_adaptation == "self_heal":
+            # Level 2: catastrophic (no replicas)
+            if "no_replicas" in unhealthy_metrics:
+                system_situation = "self_heal_hard"
+            else:
+                # Level 1: try restart/scale first
+                system_situation = "self_heal_soft"
+        else:
+            system_situation = base_adaptation
 
-        ## When system situation is healthy
+        print(f"{svc}: situation={system_situation}")
+        print(f"Unhealthy metrics: {unhealthy_metrics}")
+
+        # HEALTHY: nothing to do
         if system_situation == "healthy":
             return None, None
-        ## When system situation is warning
-        elif system_situation == "warning":
+
+        # SELF-HEAL: always act, ROI does not apply
+        if system_situation in ("self_heal_soft", "self_heal_hard"):
+            print(f"{svc}: triggering {system_situation}.")
+            return system_situation, copy.deepcopy(config)
+
+        # WARNING / UNHEALTHY: self-optimizing logic with ROI
+        new_config = copy.deepcopy(config)
+        adaptations = []
+
+        if system_situation == "warning":
             new_config = self._adopt_warning_situation(analysis_result["unhealthy_metrics"], new_config, adaptations, svc)
-        ## When system situation is unhealthy
         elif system_situation == "unhealthy":
             new_config = self._adopt_unhealthy_situation(analysis_result["unhealthy_metrics"], new_config, adaptations, svc)
 
-        print(config)
-        print(new_config)
+        print("Old config:", config)
+        print("New config:", new_config)
 
         old_cpu = (config["requests"]["cpu"] + config["limits"]["cpu"]) / 2
         new_cpu = (new_config["requests"]["cpu"] + new_config["limits"]["cpu"]) / 2
@@ -56,8 +74,7 @@ class Planner:
         # calculate roi
         roi = abs(benefit) / (total_cost + 1e-6)
         
-
-        print(f"{svc} Utility={benefit:.3f}, Cost={total_cost:.3f}, ROI={roi:.2f}")
+        print(f"{svc} Utility={benefit:.3f}, PredictedUtility={predicted_utility:.3f}, Cost={total_cost:.3f}, ROI={roi:.2f}")
 
         if roi == 0:
             print(f"Skipping adaptation for {svc} (Don't have any change between old and new config)")
@@ -68,7 +85,6 @@ class Planner:
         else:
             print(f"Proceeding with adaptation for {svc} (ROI: {roi:.2f})")
             return system_situation, new_config
-
 
     def evaluate_services(self, analysis_results, current_configs):
         decisions = {}

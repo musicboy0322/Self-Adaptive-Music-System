@@ -17,8 +17,8 @@ class Executor:
         )
         return res
 
-    def _dry_run(self, svc, mode):
-        cmd = f"sh ./mapek/config.sh --dry-run service={svc} mode={mode}"
+    def _dry_run(self, svc):
+        cmd = f"oc get deploy {svc} >/dev/null 2>&1"
         res = self._run(cmd)
         if res.returncode == 0:
             print(f"[DRY-RUN][OK] {svc} can be safely updated.")
@@ -43,7 +43,7 @@ class Executor:
         if not backup_path or not os.path.exists(backup_path):
             print(f"[ROLLBACK][ERROR] No valid backup found for {svc}.")
             return
-        rollback_cmd = f"sh ./config.sh rollback service={svc} backup={backup_path}"
+        rollback_cmd = f"oc apply -f {backup_path}"
         res = self._run(rollback_cmd)
         if res.returncode == 0:
             print(f"[ROLLBACK][OK] {svc} restored from backup.")
@@ -59,9 +59,8 @@ class Executor:
         for svc, adaptation in plan.items():
             if not adaptation:
                 continue
-            mode = system_situations[svc]
-            if not self._dry_run(svc, mode):
-                print(f"[ABORT] {svc} dry-run failed. Transaction aborted.")
+            if not self._dry_run(svc):
+                print(f"[ABORT] {svc} verification failed. Transaction aborted.")
                 return False
 
         print("\n[STEP 2] Backup & Apply changes...")
@@ -73,14 +72,47 @@ class Executor:
             backups[svc] = self._backup(svc)
             print(f"Executing adaptation for {svc}...")
 
-            if mode == "warning":
+            # Level 2: HARD SELF-HEAL – full reset with deployment.sh
+            if mode == "self_heal_hard":
+                print(f"[SELF-HEAL HARD] Running full redeployment script for {svc}...")
+                command = "bash deployment.sh"
+                res = self._run(command)
+
+                if res.returncode == 0:
+                    print("[SELF-HEAL HARD] Full redeployment succeeded.")
+                    print(res.stdout)
+                else:
+                    success = False
+                    print("[SELF-HEAL HARD][ERROR] Redeployment failed:")
+                    print(res.stderr)
+                break
+
+            # Level 1: SOFT SELF-HEAL – restart and ensure replicas
+            elif mode == "self_heal_soft":
+                replica = max(adaptation.get("replica", 1), 1)
+                command = (
+                    f"oc rollout restart deployment/{svc} && "
+                    f"oc scale deployment/{svc} --replicas={replica}"
+                )
+                res = self._run(command)
+                if res.returncode == 0:
+                    print(
+                        f"[SELF-HEAL SOFT] {svc} restarted and scaled to {replica} replicas."
+                    )
+                    print(res.stdout)
+                else:
+                    success = False
+                    print(f"[SELF-HEAL SOFT][ERROR] {svc} failed:\n{res.stderr}")
+                break
+
+            elif mode == "warning":
                 cpu_limits = adaptation["limits"]["cpu"]
                 memory_limits = adaptation["limits"]["memory"]
                 replica = adaptation["replica"]
                 command = (
-                    f"sh ./mapek/config.sh "
-                    f"cpu_limits={cpu_limits} memory_limits={memory_limits} "
-                    f"replica={replica} service={svc} mode={mode}"
+                    f"oc set resources deployment/{svc} "
+                    f"--limits=cpu={cpu_limits}m,memory={memory_limits}Mi && "
+                    f"oc scale deployment/{svc} --replicas={replica}"
                 )
 
                 res = self._run(command)
@@ -104,10 +136,10 @@ class Executor:
                 memory_limits = adaptation["limits"]["memory"]
                 replica = adaptation["replica"]
                 command = (
-                    f"sh ./mapek/config.sh "
-                    f"cpu_requests={cpu_requests} cpu_limits={cpu_limits} "
-                    f"memory_requests={memory_requests} memory_limits={memory_limits} "
-                    f"replica={replica} service={svc} mode={mode}"
+                    f"oc set resources deployment/{svc} "
+                    f"--requests=cpu={cpu_requests}m,memory={memory_requests}Mi "
+                    f"--limits=cpu={cpu_limits}m,memory={memory_limits}Mi && "
+                    f"oc scale deployment/{svc} --replicas={replica}"
                 )
 
                 res = self._run(command)

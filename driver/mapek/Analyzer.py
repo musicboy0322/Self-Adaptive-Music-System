@@ -28,7 +28,7 @@ class Analyzer:
         self.latency_weight = weights["latency"]
         self.error_rate_weight = weights["error_rate"]
 
-    def _evaluate_metrics(self, svc, cpu, memory, latency_avg, latency_max, request_count, request_per_second, request_byte_total, error_rate, gc_time):
+    def _evaluate_metrics(self, svc, cpu, memory, latency_avg, latency_max, request_count, request_per_second, request_byte_total, error_rate, gc_time, available_replicas):
         print(f"""
             CPU: {cpu:.2f}%
             Memory: {memory:.2f}%
@@ -37,8 +37,9 @@ class Analyzer:
             Request Count: {request_count:.2f}
             RPS: {request_per_second:.2f}
             Request Byte Total: {request_byte_total*1.024/1000:.2f} KB/s
-            Error Rate: {error_rate:.2f}%
+            Error Rate: {error_rate:.2f}
             GC Time: {gc_time / 1000:.2f} ms
+            Available Replicas: {available_replicas:.0f}
         """)
 
         deques = self.service_deque[svc]
@@ -63,18 +64,18 @@ class Analyzer:
             "request_byte_total": request_byte_total,
             "error_rate": error_rate_avg,
             "gc_time": gc_time,
+            "available_replicas": available_replicas,
             "overall_utility": 0,
             "adaptation": "",
             "unhealthy_metrics": unhealthy_metrics
         }
-
 
         confidence = len(deques["cpu_deque"]) / self.window_size
         if confidence >= 0.8:
             # analyze global health
             cpu_utility = self._normalize_high_is_good(self.cpu_threshold_low, self.cpu_threshold_high, cpu_avg)
             memory_utility = self._normalize_high_is_good(self.memory_threshold_low, self.memory_threshold_high, memory_avg)
-            latency_utility = self._normalize_low_is_good(self.latency_avg_threshold, latency_avg_avg/1000000)
+            latency_utility = self._normalize_low_is_good(self.latency_avg_threshold, latency_avg_avg)
             error_rate_utility = self._normalize_low_is_good(self.error_rate_threshold, error_rate_avg)
             overall_utility = cpu_utility * self.cpu_weight + memory_utility * self.memory_weight + latency_utility * self.latency_weight + error_rate_utility * self.error_rate_weight
             result["overall_utility"] = overall_utility
@@ -96,8 +97,13 @@ class Analyzer:
             if error_rate_avg > self.error_rate_threshold:
                 unhealthy_metrics.add("error_rate_high")
 
+            if available_replicas <= 0:
+                unhealthy_metrics.add("no_replicas")
+
             # analyze system health
-            if overall_utility >= 0.8 and len(unhealthy_metrics) == 0:
+            if ("no_replicas" in unhealthy_metrics or ("error_rate_high" in unhealthy_metrics and cpu_avg < self.cpu_threshold_high / 2)):
+                result["adaptation"] = "self_heal"
+            elif overall_utility >= 0.8 and len(unhealthy_metrics) == 0:
                 # everything good
                 result["adaptation"] = "healthy"
             elif overall_utility < 0.5 or len(unhealthy_metrics) >= 2:
@@ -119,7 +125,7 @@ class Analyzer:
         outputs = {svc: {} for svc in self.services}
         analysis_results = {}
 
-        for idx, (metric_id, aggregation) in enumerate(self.metrics):
+        for (metric_id, aggregation) in self.metrics:
             data = data_dict.get((metric_id, aggregation))
             if data is None:
                 print(f"No data for metric {metric_id} with aggregation {aggregation}")
@@ -153,8 +159,9 @@ class Analyzer:
             memory = metric_values.get("memory.limit.used.percent_avg", 0)
             # Other
             gc_time = metric_values.get("jvm.gc.global.time_avg", 0)
+            available_replicas = metric_values.get("kubernetes.deployment.replicas.available_max", 0)
 
-            result = self._evaluate_metrics(svc, cpu, memory, latency_avg, latency_max, request_count, request_per_second, request_byte_total, error_rate, gc_time)
+            result = self._evaluate_metrics(svc, cpu, memory, latency_avg, latency_max, request_count, request_per_second, request_byte_total, error_rate, gc_time, available_replicas)
             if result != None:
                 result["service"] = svc
                 analysis_results[svc] = result

@@ -15,9 +15,9 @@ from utils import init_csv, append_to_csv
 
 def main():
     # Create a CSV file for the dataset
-    csv_file = "datasets/metrics_dataset.csv"
-    if not os.path.exists('datasets'):
-        os.mkdir('datasets')
+    csv_file = "datasets/cartunes_metrics_dataset.csv"
+    if not os.path.exists("datasets"):
+        os.mkdir("datasets")
 
     # Read .env file
     load_dotenv()
@@ -26,15 +26,11 @@ def main():
     guid = os.getenv("GUID")
     apikey = os.getenv("APIKEY")
     url = os.getenv("URL")
-    sleep = int(os.getenv("SLEEP"))
+    sleep = int(os.getenv("SLEEP", "60"))
 
     # Target service
     service_to_use = [
-        "acmeair-mainservice",
-        "acmeair-authservice",
-        "acmeair-flightservice",
-        "acmeair-customerservice",
-        "acmeair-bookingservice"
+        "cartunes-app"
     ]
 
     current_configs = {svc: {"cpu": 500, "memory": 512, "replica": 1} for svc in service_to_use}
@@ -76,6 +72,7 @@ def main():
         # Saturation
         ("cpu.quota.used.percent", "avg"),
         ("memory.limit.used.percent", "avg"),
+        ("kubernetes.deployment.replicas.available", "max"),
     ]
 
     # Initialize CSV file
@@ -85,23 +82,23 @@ def main():
     knowledge = Knowledge("./mapek/knowledge.json")
     resources = knowledge.get_resources()
     current_configs = {
-            svc: {
-                "requests": {
-                    "cpu": resources[svc]["requests"]["cpu"],
-                    "memory": resources[svc]["requests"]["memory"]
-                },
-                "limits": {
-                    "cpu": resources[svc]["limits"]["cpu"],
-                    "memory": resources[svc]["limits"]["memory"]
-                },
-                "replica": resources[svc]["replica"]
-            }
-            for svc in service_to_use
+        svc: {
+            "requests": {
+                "cpu": resources[svc]["requests"]["cpu"],
+                "memory": resources[svc]["requests"]["memory"]
+            },
+            "limits": {
+                "cpu": resources[svc]["limits"]["cpu"],
+                "memory": resources[svc]["limits"]["memory"]
+            },
+            "replica": resources[svc]["replica"]
+        }
+        for svc in service_to_use
     }
 
     monitor = Monitor(url, apikey, guid, sleep)
     analyzer = Analyzer(analyze_metrics, service_to_use, knowledge.get_threshold(), knowledge.get_weight())
-    planner = Planner(service_to_use, knowledge.get_resource_limitations(), knowledge.get_resource_limitations(), knowledge.get_threshold()["roi"])
+    planner = Planner(service_to_use, knowledge.get_resource_limitations(), knowledge.get_resources(), knowledge.get_threshold()["roi"])
     executor = Executor()
 
     print("")

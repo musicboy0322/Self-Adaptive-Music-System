@@ -1,95 +1,51 @@
 {
-    "thresholds": {
-      "cpu": {
-        "low": 20,
-        "high": 80
-      },
-      "memory": {
-        "low": 30,
-        "high": 80
-      },
-      "latency": {
-        "avg": 150,
-        "max": 200
-      },
-      "error_rate": 1,
-      "roi": 0.5
+  "thresholds": {
+    "cpu": {
+      "low": 20,
+      "high": 80
     },
-    "weights": {
-      "cpu": 0.15,
-      "memory": 0.15,
-      "latency": 0.35,
-      "error_rate": 0.35
+    "memory": {
+      "low": 30,
+      "high": 80
     },
-    "resources": {
-      "acmeair-authservice": {
-        "requests": {
-          "memory": 256,
-          "cpu": 250
-        }, 
-        "limits": {
-          "memory": 512,
-          "cpu": 500
-        },
-        "replica": 1
-      },
-      "acmeair-bookingservice": {
-        "requests": {
-          "memory": 256,
-          "cpu": 250
-        }, 
-        "limits": {
-          "memory": 512,
-          "cpu": 500
-        },
-        "replica": 1
-      },
-      "acmeair-customerservice": {
-        "requests": {
-          "memory": 256,
-          "cpu": 250
-        }, 
-        "limits": {
-          "memory": 512,
-          "cpu": 500
-        },
-        "replica": 1
-      },
-      "acmeair-flightservice": {
-        "requests": {
-          "memory": 256,
-          "cpu": 250
-        }, 
-        "limits": {
-          "memory": 512,
-          "cpu": 500
-        },
-        "replica": 1
-      },
-      "acmeair-mainservice": {
-        "requests": {
-          "memory": 256,
-          "cpu": 250
-        }, 
-        "limits": {
-          "memory": 512,
-          "cpu": 500
-        },
-        "replica": 1
-      }
+    "latency": {
+      "avg": 150,
+      "max": 200
     },
-    "resources_limitations": {
-      "single": {
-        "min_memory": 256,
-        "max_memory": 1024,
-        "min_cpu": 500,
-        "max_cpu": 2000,
-        "min_replica": 1,
-        "max_replica": 4
+    "error_rate": 1,
+    "roi": 0.5
+  },
+  "weights": {
+    "cpu": 0.15,
+    "memory": 0.15,
+    "latency": 0.35,
+    "error_rate": 0.35
+  },
+  "resources": {
+    "cartunes-app": {
+      "requests": {
+        "memory": 256,
+        "cpu": 250
       },
-      "total": {
-        "memory": 8192,
-        "cpu": 8000
-      }
+      "limits": {
+        "memory": 512,
+        "cpu": 500
+      },
+      "replica": 1
+    }
+  },
+  "resources_limitations": {
+    "single": {
+      "min_memory": 256,
+      "max_memory": 1024,
+      "min_cpu": 250,
+      "max_cpu": 2000,
+      "min_replica": 1,
+      "max_replica": 4
+    },
+    "total": {
+      "memory": 8192,
+      "cpu": 8000
     }
   }
+}
