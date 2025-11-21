@@ -371,29 +371,39 @@ async def handle_failed_song(video_id: str):
 
 
 async def audio_preloader():
-    """Background task to preload upcoming songs"""
+    """Background task to preload upcoming mock songs sequentially."""
     while True:
         try:
             for room_id in room_manager.rooms.keys():
                 room = room_manager.get_room(room_id)
-                if room and room.queue:
-                    # Get top 5 video IDs of upcoming songs from queue
-                    upcoming_video_ids = [song.video_id for song in room.queue[:preload_song]]
+                if not room or not room.current_song:
+                    continue
+                current_video_id = room.current_song.video_id
+                try:
+                    base_num = int(current_video_id.split("_")[0])
+                except ValueError:
+                    continue  
+                upcoming_video_ids = [f"{base_num + i}_song" for i in range(1, 6)]
 
-                    # Also preload top 3 songs from autoplay_playlist
-                    if room.autoplay_playlist:
-                        autoplay_video_ids = [song_data['video_id'] for song_data in
-                                              room.autoplay_playlist[:3]]
-                        upcoming_video_ids.extend(autoplay_video_ids)
+                to_preload = [
+                    vid for vid in upcoming_video_ids
+                    if not audio_cache_manager.get_cache_path(vid)
+                    and not audio_cache_manager.is_downloading(vid)
+                ]
 
-                    if upcoming_video_ids:
-                        await audio_cache_manager.preload_queue_songs(upcoming_video_ids)
-
+                if to_preload:
+                    asyncio.create_task(
+                        audio_cache_manager.preload_queue_songs(
+                            to_preload, 
+                            audio_cache_manager.get_song_quality(), 
+                            preload_song  
+                        )
+                    )
         except Exception as e:
             logger.error(f"Error in audio preloader: {e}")
 
-        # Check every 30 seconds
         await asyncio.sleep(30)
+
 
 
 # ===== Room Endpoints =====
