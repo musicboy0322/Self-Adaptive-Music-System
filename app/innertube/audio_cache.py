@@ -4,7 +4,7 @@ import os
 import shutil
 import tempfile
 from datetime import datetime, timedelta
-from typing import Dict, Set, Optional
+from typing import Dict, Set, Optional, Any
 import time
 import random
 
@@ -44,16 +44,14 @@ class AudioCacheManager:
             file_info = self.cached_files[video_id]
             file_path = file_info['path']
 
-            # 命中有效快取
             if (os.path.exists(file_path) and
                     datetime.now() - file_info['last_ordered_at'] < self.cache_duration):
-                self.cache_hits += 1   # ✅ 記錄 hit
+                self.cache_hits += 1  
                 return file_path
             else:
                 self._remove_from_cache(video_id)
 
-        # 如果走到這裡，代表 miss
-        self.cache_misses += 1        # ✅ 記錄 miss
+        self.cache_misses += 1       
         return None
 
     def is_downloading(self, video_id: str) -> bool:
@@ -66,7 +64,7 @@ class AudioCacheManager:
             self.cached_files[video_id]['last_ordered_at'] = datetime.now()
             logger.debug(f"Refreshed cache timer for {video_id}")
 
-    async def download_audio(self, video_id: str, song_quality: str, priority: bool = False) -> Optional[str]:
+    async def download_audio(self, video_id: str, priority: bool = False) -> Optional[str]:
         """Simulate audio download based on quality profile."""
         start_time = time.time()
 
@@ -82,8 +80,7 @@ class AudioCacheManager:
 
         self.download_events[video_id] = asyncio.Event()
         try:
-            # === 模擬不同音質下載時間 ===
-            profile = self.song_quality_profiles[song_quality]
+            profile = self.song_quality_profiles[self.song_quality]
             avg_download_time_range = profile["avg_download_time_range"]
             random_time = random.uniform(*avg_download_time_range)
             await asyncio.sleep(random_time)
@@ -100,7 +97,7 @@ class AudioCacheManager:
             elapsed = end_time - start_time
             self.download_time.append(elapsed)
 
-            logger.info(f"[Mock Download] {video_id} downloaded in {elapsed:.2f}s ({song_quality})")
+            logger.info(f"[Mock Download] {video_id} downloaded in {elapsed:.2f}s ({self.song_quality})")
             return f"{video_id}_song"
         finally:
             self.download_events[video_id].set()

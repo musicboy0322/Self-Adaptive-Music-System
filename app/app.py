@@ -9,7 +9,7 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager
-from typing import Dict
+from typing import Dict, Optional, Any
 
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,11 +28,33 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 config = utils.read_config()
+
+# Application level metrcis
+play_request_start: Dict[str, float] = {}
+preload_song = 5
+song_quality_profiles = {
+    "low": {
+        "bitrate_kbps": 64,
+        "avg_download_time_range": [0.5, 2.0],
+        "file_size_mb": 1.4,
+    },
+    "medium": {
+        "bitrate_kbps": 128,
+        "avg_download_time_range": [2.0, 4.0],
+        "file_size_mb": 2.8,
+    },
+    "high": {
+        "bitrate_kbps": 256,
+        "avg_download_time_range": [4.0, 8.0],
+        "file_size_mb": 5.6,
+    }
+}
+
 room_manager = RoomManager(config['maximum_room'])
 ws_manager = ConnectionManager()
 audio_cache_manager = AudioCacheManager(config['max_cache_size_mb'], config['cache_duration_hours'], 
                                         config['audio_quality_kbps'], config['loudness_normalization'],
-                                        config['song_quality_profiles'], "medium")
+                                        song_quality_profiles, "medium")
 
 # Dictionary to store the last request time for each room and action, for throttling
 # Used for playback control, skipping, and autoplay toggling
@@ -49,9 +71,6 @@ pinging_tasks: Dict[str, asyncio.Task] = {}
 
 background_tasks = set()
 
-# Application level metrcis
-play_request_start: Dict[str, float] = {}
-preload_song = config['preload_song']
 
 # App lifespan manager
 @asynccontextmanager
@@ -648,7 +667,7 @@ async def add_song_to_queue(room_id: str, request: AddSongRequest, user_id: str 
     upcoming_video_ids = [s.video_id for s in room.queue[:preload_song]]
     if room.current_song:
         upcoming_video_ids.insert(0, room.current_song.video_id)
-    asyncio.create_task(audio_cache_manager.preload_queue_songs(upcoming_video_ids, preload_song))
+    asyncio.create_task(audio_cache_manager.preload_queue_songs(upcoming_video_ids, audio_cache_manager.get_song_quality(), preload_song))
 
     return AddSongResponse(
         message="Song added to queue",
