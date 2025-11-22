@@ -15,8 +15,7 @@ logger = logging.getLogger(__name__)
 class AudioCacheManager:
     def __init__(self, max_cache_size_mb: int, cache_duration_hours: int, audio_quality_kbps: int, loudness_normalization: bool, song_quality_profiles: Dict[str, Dict[str, Any]], song_quality: str):
         self.cache_dir = tempfile.mkdtemp(prefix="cartunes_audio_")
-        self.cached_files: Dict[
-            str, dict] = {}  # video_id -> {path, downloaded_at, last_ordered_at, size}
+        self.cached_files: Dict[str, dict] = {}  # video_id -> {path, downloaded_at, last_ordered_at, size}
         self.download_events: Dict[str, asyncio.Event] = {} # Track currently downloading videos by asyncio.Event
         self.max_cache_size_mb = max_cache_size_mb
         self.cache_duration = timedelta(hours=cache_duration_hours)
@@ -28,6 +27,7 @@ class AudioCacheManager:
         self.cache_hits = 0
         self.cache_misses = 0
         self.download_time = []
+        self.playback_latencies = []
         if self.ffmpeg_path:
             logger.warning(f"Found ffmpeg at: {self.ffmpeg_path}")
         else:
@@ -66,30 +66,25 @@ class AudioCacheManager:
 
     async def download_audio(self, video_id: str, priority: bool = False) -> Optional[str]:
         """Mock yt-dlp-like download but without real network."""
-        start = time.time()
 
-        # 1. 如果正在下載 → 等它下載完
+        start = time.time()
         if video_id in self.download_events:
             await self.download_events[video_id].wait()
             self.refresh_cache_timer(video_id)
             return self.get_cache_path(video_id)
 
-        # 2. 如果 cache 有 → 直接回傳
         cached = self.get_cache_path(video_id)
         if cached:
             self.refresh_cache_timer(video_id)
             return cached
 
-        # 3. 標記 this video 正在下載
         self.download_events[video_id] = asyncio.Event()
 
         try:
             profile = self.song_quality_profiles[self.song_quality]
 
-            # === 使用 chunk-based yt-dlp 模擬器 ===
             downloaded_file = await self._simulate_ytdlp_download(video_id, profile)
 
-            # === 加入 cache 記錄 ===
             now = datetime.now()
             size_bytes = os.path.getsize(downloaded_file)
 
@@ -103,11 +98,9 @@ class AudioCacheManager:
             elapsed = time.time() - start
             self.download_time.append(elapsed)
             logger.info(f"[Mock yt-dlp] {video_id} finished in {elapsed:.2f}s ({self.song_quality})")
-
             return downloaded_file
 
         finally:
-            # 解除鎖定
             self.download_events[video_id].set()
             del self.download_events[video_id]
 
@@ -275,7 +268,7 @@ class AudioCacheManager:
         logger.info(f"[Adaptive] Cache size adjusted from {old_size}MB to {new_size_mb}MB")
     
     def get_download_time(self):
-        result = self.download_time
+        result = list(self.download_time)  # make a copy
         self.download_time.clear()
         return result
 
@@ -296,14 +289,12 @@ class AudioCacheManager:
         return (self.cache_hits, self.cache_misses)
     
     def record_playback_latency(self, latency: float):
-        if not hasattr(self, "playback_latencies"):
-            self.playback_latencies = []
         self.playback_latencies.append(latency)
 
     def get_playback_latency(self):
         if not hasattr(self, "playback_latencies") or not self.playback_latencies:
             return 0.0
-        result = self.playback_latencies
+        result = list(self.playback_latencies)
         self.playback_latencies.clear()
         return result
 
@@ -322,80 +313,31 @@ class AudioCacheManager:
 
     async def _simulate_ytdlp_download(self, video_id: str, profile: dict):
         """
-        High-load yt-dlp + ffmpeg simulator:
-        - heavy network chunk simulation
-        - multi-core CPU encode/decode
-        - heavy disk writes + fsync
-        - threadpool saturation
-        - jitter, tail latency, freezing stalls
+        Lightweight version of mock yt-dlp download.
+        Much faster: minimal CPU + minimal disk writes.
         """
 
-        loop = asyncio.get_running_loop()
+        total_size_mb = profile.get("file_size_mb", 2)
+        avg_time = random.uniform(*profile["avg_download_time_range"])
 
-        total_size_mb = profile.get("file_size_mb", 5)
-        avg_download_time = random.uniform(*profile["avg_download_time_range"])
-        chunks = 140 + random.randint(-20, 20)
+        # Simulate download time with random jitter (non-blocking)
+        await asyncio.sleep(avg_time)
 
-        chunk_size = int((total_size_mb * 1024 * 1024) / chunks)
-
-        net_total = avg_download_time * 0.65
-        cpu_total = avg_download_time * 0.35
-
-        net_per_chunk = net_total / chunks
-        cpu_per_chunk = cpu_total / chunks
-
-        cpu_parallelism = profile.get("cpu_threads", 4)
-
+        # Create a small dummy file instead of huge chunk writes
         temp_path = os.path.join(self.cache_dir, f"{video_id}.tmp")
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+        with open(temp_path, "wb") as f:
+            f.write(os.urandom(1024 * 100))  # ~100KB instead of multi-MB
 
-        if random.random() < 0.3:
-            stall = random.uniform(0.4, 1.8)
-            await asyncio.sleep(stall)
+        # Lightweight CPU work (simulate FFmpeg)
+        # MUCH cheaper than your cpu_heavy loop.
+        for _ in range(100000):
+            pass
 
-        for c in range(chunks):
-
-            jitter = random.uniform(-0.2, 0.8)
-            delay = max(0, net_per_chunk * (1 + jitter))
-
-            if random.random() < 0.05:
-                delay += random.uniform(0.5, 1.5)
-
-            await asyncio.sleep(delay)
-
-            cpu_tasks = [
-                loop.run_in_executor(None, self.cpu_heavy, cpu_per_chunk / cpu_parallelism)
-                for _ in range(cpu_parallelism)
-            ]
-
-            if random.random() < 0.3:
-                cpu_tasks.append(
-                    loop.run_in_executor(None, self.cpu_heavy, cpu_per_chunk * 0.2)
-                )
-
-            await asyncio.gather(*cpu_tasks)
-
-            extra_cpu_tasks = [
-                loop.run_in_executor(None, self.cpu_heavy, cpu_per_chunk * 0.08)
-                for _ in range(8)
-            ]
-
-            async def _bg_cpu():
-                await asyncio.gather(*extra_cpu_tasks)
-
-            asyncio.create_task(_bg_cpu())
-            await loop.run_in_executor(None, self.io_write_chunk, temp_path, chunk_size)
-
-        ffmpeg_cpu_time = random.uniform(1.0, 2.5)
-        await loop.run_in_executor(None, self.cpu_heavy, ffmpeg_cpu_time)
-
+        # Rename to final mp3
         final_path = os.path.join(self.cache_dir, f"{video_id}.mp3")
         if os.path.exists(final_path):
             os.remove(final_path)
-
         os.rename(temp_path, final_path)
 
-        await loop.run_in_executor(None, self.io_write_chunk, final_path, 1024)
-
         return final_path
+

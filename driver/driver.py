@@ -38,14 +38,10 @@ def main():
     # Metrics settings
     monitor_metrics = [
         # avg
-        ("jvm.heap.used.percent", "avg"),
-        ("jvm.gc.global.time", "avg"),
-        ("jvm.nonHeap.used.percent", "avg"),
         ("cpu.quota.used.percent", "avg"),
         ("memory.limit.used.percent", "avg"),
         ("net.request.time.in", "avg"),
         # max
-        ("jvm.thread.count", "max"),
         ("net.http.request.time", "max"),
         ("net.request.time.in", "max"),
         ("net.bytes.in", "max"),
@@ -53,7 +49,6 @@ def main():
         ("net.bytes.total", "max"),
         ("kubernetes.deployment.replicas.available", "max"),
         # sum
-        ("jvm.gc.global.count", "sum"),
         ("net.request.count.in", "sum"),
         ("net.http.error.count", "sum"),
         ("net.bytes.total", "sum"),
@@ -121,6 +116,7 @@ def main():
                 data_dict[(metric, agg)] = res
             else:
                 print(f"Failed to fetch {metric} with {agg} aggregation")
+        monitor.fetch_data_from_cartunes()
         
         # ANALYZE: Process metrics
         print("[Analyzing Stage]")

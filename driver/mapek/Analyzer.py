@@ -28,7 +28,7 @@ class Analyzer:
         self.latency_weight = weights["latency"]
         self.error_rate_weight = weights["error_rate"]
 
-    def _evaluate_metrics(self, svc, cpu, memory, latency_avg, latency_max, request_count, request_per_second, request_byte_total, error_rate, gc_time, available_replicas):
+    def _evaluate_metrics(self, svc, cpu, memory, latency_avg, latency_max, request_count, request_per_second, request_byte_total, error_rate, available_replicas):
         print(f"""
             CPU: {cpu:.2f}%
             Memory: {memory:.2f}%
@@ -38,7 +38,6 @@ class Analyzer:
             RPS: {request_per_second:.2f}
             Request Byte Total: {request_byte_total*1.024/1000:.2f} KB/s
             Error Rate: {error_rate:.2f}
-            GC Time: {gc_time / 1000:.2f} ms
             Available Replicas: {available_replicas:.0f}
         """)
 
@@ -63,7 +62,6 @@ class Analyzer:
             "request_per_second": request_per_second,
             "request_byte_total": request_byte_total,
             "error_rate": error_rate_avg,
-            "gc_time": gc_time,
             "available_replicas": available_replicas,
             "overall_utility": 0,
             "adaptation": "",
@@ -130,15 +128,17 @@ class Analyzer:
             if data is None:
                 print(f"No data for metric {metric_id} with aggregation {aggregation}")
                 continue
+            try:
+                df = self._create_dataframe(data)
+                df_filtered = df[df['service'].isin(self.services)]
+                avg_values = df_filtered.groupby('service')['value'].mean()
 
-            df = self._create_dataframe(data)
-            df_filtered = df[df['service'].isin(self.services)]
-            avg_values = df_filtered.groupby('service')['value'].mean()
+                metric_name = f"{metric_id}_{aggregation}"
 
-            metric_name = f"{metric_id}_{aggregation}"
-
-            for svc, val in avg_values.items():
-                outputs[svc][metric_name] = val
+                for svc, val in avg_values.items():
+                    outputs[svc][metric_name] = val
+            except:
+                print("Use default val")
 
         for svc, metric_values in outputs.items():
             print("//////////////////////////////////////////")
@@ -158,10 +158,9 @@ class Analyzer:
             cpu = metric_values.get("cpu.quota.used.percent_avg", 0)
             memory = metric_values.get("memory.limit.used.percent_avg", 0)
             # Other
-            gc_time = metric_values.get("jvm.gc.global.time_avg", 0)
             available_replicas = metric_values.get("kubernetes.deployment.replicas.available_max", 0)
 
-            result = self._evaluate_metrics(svc, cpu, memory, latency_avg, latency_max, request_count, request_per_second, request_byte_total, error_rate, gc_time, available_replicas)
+            result = self._evaluate_metrics(svc, cpu, memory, latency_avg, latency_max, request_count, request_per_second, request_byte_total, error_rate, available_replicas)
             if result != None:
                 result["service"] = svc
                 analysis_results[svc] = result

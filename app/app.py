@@ -35,17 +35,17 @@ preload_song = 5
 song_quality_profiles = {
     "low": {
         "bitrate_kbps": 64,
-        "avg_download_time_range": [0.5, 2.0],
+        "avg_download_time_range": [3.0, 7.0],
         "file_size_mb": 1.4,
     },
     "medium": {
         "bitrate_kbps": 128,
-        "avg_download_time_range": [2.0, 4.0],
+        "avg_download_time_range": [7.0, 10.0],
         "file_size_mb": 2.8,
     },
     "high": {
         "bitrate_kbps": 256,
-        "avg_download_time_range": [4.0, 8.0],
+        "avg_download_time_range": [10.0, 15.0],
         "file_size_mb": 5.6,
     }
 }
@@ -253,44 +253,56 @@ async def root():
 @app.get("/api/audio/{video_id}/status")
 async def get_audio_status(video_id: str, room_id: str = Query(None)):
     """Get the download status of an audio file"""
-    logger.info(f"Status check requested for video {video_id}, room {room_id}")
-
+    
+    # 只在首次呼叫時設定 timer
     if video_id not in play_request_start:
+        logger.info(f"[Latency] Start timer for {video_id}")
         play_request_start[video_id] = time.time()
 
+    # 檢查是否正在下載
     if audio_cache_manager.is_downloading(video_id):
         logger.info(f"Video {video_id} is downloading")
-        return {"status": "downloading", "is_downloading": True}
+        return {
+            "status": "downloading", 
+            "is_downloading": True,
+            "elapsed_time": time.time() - play_request_start[video_id]
+        }
 
-    elif audio_cache_manager.get_cache_path(video_id):
+    # 檢查是否已緩存
+    cached = audio_cache_manager.get_cache_path(video_id)
+    if cached:
         logger.info(f"Video {video_id} is ready")
-
-        latency = None
+        
+        # 計算從 FIRST status 呼叫到 ready 的總時間
+        latency = time.time() - play_request_start[video_id]
+        audio_cache_manager.record_playback_latency(latency)
+        logger.info(f"[Metrics] Playback latency for {video_id}: {latency:.3f}s")
+        
+        # 清理記錄
         if video_id in play_request_start:
-            latency = time.time() - play_request_start.pop(video_id)
-            audio_cache_manager.record_playback_latency(latency)
-            logger.info(f"[Metrics] Playback latency for {video_id}: {latency:.3f}s")
+            del play_request_start[video_id]
 
-        if room_id:
-            started = room_manager.start_audio_ready_playback(room_id, video_id)
-            if started:
-                await ws_manager.broadcast_playback_state(
-                    room_id,
-                    True,
-                    -abs(config['song_start_delay_seconds'])
-                )
+        return {
+            "status": "ready", 
+            "latency": latency, 
+            "is_downloading": False
+        }
 
-        return {"status": "ready", "latency": latency, "is_downloading": False}
-
-    else:
-        logger.info(f"Video {video_id} not found")
-        raise HTTPException(status_code=404, detail="Audio not found or not yet initiated download")
+    # 未開始下載 → 視為正在下載
+    logger.info(f"Video {video_id} not started; treat as downloading")
+    return {
+        "status": "downloading", 
+        "is_downloading": True,
+        "elapsed_time": time.time() - play_request_start[video_id]
+    }
 
 
 
 @app.get("/api/stream/{video_id}")
 async def stream_audio(video_id: str):
     """Stream downloaded audio file"""
+    if video_id not in play_request_start:
+        play_request_start[video_id] = time.time()
     try:
         # Check if file is already cached
         cached_path = audio_cache_manager.get_cache_path(video_id)
