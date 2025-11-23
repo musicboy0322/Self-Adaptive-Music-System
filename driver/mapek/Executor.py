@@ -4,8 +4,7 @@ import datetime
 
 class Executor:
     def __init__(self):
-        self.backup_dir = "./backup"
-        os.makedirs(self.backup_dir, exist_ok=True)
+        pass
 
     def _run(self, command):
         res = subprocess.run(
@@ -27,65 +26,42 @@ class Executor:
             print(f"[DRY-RUN][ERROR] {svc} verification failed:\n{res.stderr}")
             return False
 
-    def _backup(self, svc):
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_path = f"{self.backup_dir}/{svc}_{timestamp}.yaml"
-        backup_cmd = f"oc get deploy {svc} -o yaml > {backup_path}"
-        backup_res = subprocess.run(backup_cmd, shell=True)
-        if backup_res.returncode == 0:
-            print(f"[BACKUP] {svc} saved to {backup_path}")
-            return backup_path
-        else:
-            print(f"[BACKUP][WARNING] Failed to backup {svc}.")
-            return None
-
-    def _rollback(self, svc, backup_path):
-        if not backup_path or not os.path.exists(backup_path):
-            print(f"[ROLLBACK][ERROR] No valid backup found for {svc}.")
-            return
-        rollback_cmd = f"oc apply -f {backup_path}"
-        res = self._run(rollback_cmd)
+    # hard self-heal function
+    def _hard_self_heal(self, svc):
+        print(f"[HARD SELF-HEAL] Running full redeployment script for {svc}...")
+        command = "bash deployment.sh"
+        res = self._run(command)
+        print(res.stdout)
         if res.returncode == 0:
-            print(f"[ROLLBACK][OK] {svc} restored from backup.")
+            print("[HARD SELF-HEAL] Full redeployment succeeded.")
+            return True
         else:
-            print(f"[ROLLBACK][FAIL] {svc} rollback failed:\n{res.stderr}")
+            print("[HARD SELF-HEAL][ERROR] Redeployment failed:")
+            print(res.stderr)
+            return False
 
     def execute_plan(self, plan, configs, system_situations):
         print("======== Starting Atomic Adaptation Transaction ========")
-        success = True
-        backups = {}
 
         print("\n[STEP 1] Dry-run verification for all services...")
         for svc, adaptation in plan.items():
             if not adaptation:
                 continue
             if not self._dry_run(svc):
-                print(f"[ABORT] {svc} verification failed. Transaction aborted.")
-                return False
+                print(f"[ABORT] {svc} verification failed. Triggering HARD SELF-HEAL.")
+                return self._hard_self_heal(svc)
 
-        print("\n[STEP 2] Backup & Apply changes...")
+        print("\n[STEP 2] Apply changes...")
         for svc, adaptation in plan.items():
             if not adaptation:
                 continue
 
             mode = system_situations[svc]
-            backups[svc] = self._backup(svc)
             print(f"Executing adaptation for {svc}...")
 
             # Level 2: HARD SELF-HEAL – full reset with deployment.sh
             if mode == "self_heal_hard":
-                print(f"[SELF-HEAL HARD] Running full redeployment script for {svc}...")
-                command = "bash deployment.sh"
-                res = self._run(command)
-
-                if res.returncode == 0:
-                    print("[SELF-HEAL HARD] Full redeployment succeeded.")
-                    print(res.stdout)
-                else:
-                    success = False
-                    print("[SELF-HEAL HARD][ERROR] Redeployment failed:")
-                    print(res.stderr)
-                break
+                return self._hard_self_heal(svc)
 
             # Level 1: SOFT SELF-HEAL – restart and ensure replicas
             elif mode == "self_heal_soft":
@@ -96,14 +72,12 @@ class Executor:
                 )
                 res = self._run(command)
                 if res.returncode == 0:
-                    print(
-                        f"[SELF-HEAL SOFT] {svc} restarted and scaled to {replica} replicas."
-                    )
+                    print(f"[SELF-HEAL SOFT] {svc} restarted and scaled to {replica} replicas.")
                     print(res.stdout)
                 else:
-                    success = False
                     print(f"[SELF-HEAL SOFT][ERROR] {svc} failed:\n{res.stderr}")
-                break
+                    print("[SELF-HEAL SOFT] Falling back to HARD SELF-HEAL.")
+                    return self._hard_self_heal(svc)
 
             elif mode == "warning":
                 cpu_limits = adaptation["limits"]["cpu"]
@@ -125,10 +99,11 @@ class Executor:
                         print(f"Replica is changed from {configs[svc]['replica']} to {replica} for {svc}")
                     print(res.stdout)
                 else:
-                    success = False
                     print(f"{svc}: Adaptation failed with error:")
                     print(res.stderr)
-                    break
+                    print("[WARNING] Falling back to HARD SELF-HEAL.")
+                    return self._hard_self_heal(svc)
+
             elif mode == "unhealthy":
                 cpu_requests = adaptation["requests"]["cpu"]
                 cpu_limits = adaptation["limits"]["cpu"]
@@ -156,17 +131,10 @@ class Executor:
                         print(f"Replica is changed from {configs[svc]['replica']} to {replica} for {svc}")
                     print(res.stdout)
                 else:
-                    success = False
                     print(f"{svc}: Adaptation failed with error:")
                     print(res.stderr)
-                    break
-
-        if not success:
-            print("\n[STEP 3] Rolling back all previously modified services...")
-            for rollback_svc, backup_file in backups.items():
-                self._rollback(rollback_svc, backup_file)
-            print("[TRANSACTION][ABORTED] All changes reverted.")
-            return False
+                    print("[UNHEALTHY] Falling back to HARD SELF-HEAL.")
+                    return self._hard_self_heal(svc)
 
         print("\n[STEP 3] All services successfully updated.")
         print("[TRANSACTION][SUCCESS] Atomic adaptation completed.")
