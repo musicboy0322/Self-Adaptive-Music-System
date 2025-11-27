@@ -86,7 +86,10 @@ def main():
                 "cpu": resources[svc]["limits"]["cpu"],
                 "memory": resources[svc]["limits"]["memory"]
             },
-            "replica": resources[svc]["replica"]
+            "replica": resources[svc]["replica"],
+            "song_quality": resources[svc]["song_quality"],
+            "preload_song": resources[svc]["preload_song"],
+            "cache_size": resources[svc]["cache_size"]
         }
         for svc in service_to_use
     }
@@ -109,18 +112,19 @@ def main():
         print("[Monitoring Stage]")
         print("Getting metrics from IBM Cloud...")
         print("")
-        data_dict = {}
+        qos_data = {}
         for metric, agg in monitor_metrics:
             res = monitor.fetch_data_from_ibm(metric, agg)
             if res:
-                data_dict[(metric, agg)] = res
+                qos_data[(metric, agg)] = res
             else:
                 print(f"Failed to fetch {metric} with {agg} aggregation")
-        monitor.fetch_data_from_cartunes()
+        qoe_data = monitor.fetch_data_from_cartunes()
+        print("")
         
         # ANALYZE: Process metrics
         print("[Analyzing Stage]")
-        analysis_results = analyzer.process_data(data_dict)
+        analysis_results = analyzer.process_data(qos_data, qoe_data)
         if len(analysis_results) == 0:
             print("Need to gather more data to continue, preventing from scaling flapping")
             time.sleep(sleep)
@@ -133,7 +137,11 @@ def main():
 
         # EXECUTE: Apply adaptations
         print("[Executing Stage]")
-        success = executor.execute_plan(decisions, current_configs, system_situations)
+        if system_situations == "qoe_unhealthy":
+            sucess = executor.execute_qoe_plan(decisions, new_configs, system_situations)
+        else: 
+            success = executor.execute_qos_plan(decisions, current_configs, system_situations)
+
         if success:
             print("Successfully executed adaptation")
             current_configs = new_configs
@@ -142,7 +150,7 @@ def main():
 
         # KNOWLEDGE: Store data with adaptation information
         timestamp = datetime.now().isoformat()
-        append_to_csv(csv_file, timestamp, data_dict, service_to_use)
+        append_to_csv(csv_file, timestamp, qos_data, service_to_use)
 
         # wait for next round
         time.sleep(sleep)

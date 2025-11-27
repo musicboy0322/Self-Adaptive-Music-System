@@ -67,7 +67,6 @@ def append_to_csv(csv_file, timestamp, data_dict, service_to_use):
                     if svc in service_to_use:
                         service_data[svc][header] = val
         except Exception as e:
-            print(f"Error processing metric {metric_id} with aggregation {agg}: {e}")
             continue
 
     try:

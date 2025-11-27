@@ -47,11 +47,17 @@ class Monitor:
             response = requests.get(url, timeout=5)
             response.raise_for_status()  # 若狀態碼不是 200 會丟錯誤
             data = response.json()
-            print("Metrics:")
-            print(f"  cache_usage         : {data.get('cache_usage')}")
-            print(f"  cache_hit_ratio     : {data.get('cache_hit_ratio')}")
-            print(f"  avg_playback_latency: {data.get('avg_playback_latency')}")
-            print(f"  avg_download_time   : {data.get('avg_download_time')}")
+            cache_usage = 0
+            cache_hit_ratio = 0
+            if data.get('disk_usage') != None:
+                cache_usage = data.get('cache_usage')
+            if data.get('cache_hit_ratio')[0] != 0 and data.get('cache_hit_ratio')[1] != 0:
+                cache_hit_ratio = data.get('cache_hit_ratio')[0] / (data.get('cache_hit_ratio')[0] + data.get('cache_hit_ratio')[1])
+            print("Application Metrics:")
+            print(f"  cache_usage         : {data.get('disk_usage')}%")
+            print(f"  cache_hit_ratio     : {cache_hit_ratio * 100}%")
+            print(f"  avg_playback_latency: {data.get('avg_playback_latency')}s")
+            print(f"  avg_download_time   : {data.get('avg_download_time')}s")
             return data
         except requests.exceptions.RequestException as e:
             print(f"❌ Request failed: {e}")

@@ -1,6 +1,7 @@
 import subprocess
 import os
 import datetime
+import requests
 
 class Executor:
     def __init__(self):
@@ -40,7 +41,7 @@ class Executor:
             print(res.stderr)
             return False
 
-    def execute_plan(self, plan, configs, system_situations):
+    def execute_qos_plan(self, plan, configs, system_situations):
         print("======== Starting Atomic Adaptation Transaction ========")
 
         print("\n[STEP 1] Dry-run verification for all services...")
@@ -139,3 +140,25 @@ class Executor:
         print("\n[STEP 3] All services successfully updated.")
         print("[TRANSACTION][SUCCESS] Atomic adaptation completed.")
         return True
+    
+    def execute_qoe_plan(self, plan, configs, system_situations):
+        song_quality = configs["song_quality"]
+        preload_song = configs["preload_song"]
+        cache_size = configs["cache_size"]
+
+        base_url = "http://cartunes-app-acmeair-group6.mycluster-ca-tor-1-835845-04e8c71ff333c8969bc4cbc5a77a70f6-0000.ca-tor.containers.appdomain.cloud"
+
+        params = {
+            "changed_cache_size": cache_size,
+            "changed_preload_song": preload_song,
+            "changed_song_quality": song_quality
+        }
+
+        res = requests.post(f"{base_url}/api/config/update", params=params)
+        print(res.json())
+
+        return True
+
+
+
+

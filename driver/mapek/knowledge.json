@@ -12,6 +12,19 @@
       "avg": 150,
       "max": 200
     },
+    "avg_download_time": {
+      "low": 3,
+      "high": 7
+    },
+    "avg_playback_latency": {
+      "low": 3,
+      "high": 7 
+    },
+    "cache_hit_ratio": {
+      "low": 50,
+      "high": 90
+    },
+    "disk_usage": 85,
     "error_rate": 1,
     "roi": 0.5
   },
@@ -19,7 +32,11 @@
     "cpu": 0.15,
     "memory": 0.15,
     "latency": 0.35,
-    "error_rate": 0.35
+    "error_rate": 0.35,
+    "avg_playback_latency": 0.4,
+    "avg_download_time": 0.3,
+    "cache_hit_ratio": 0.2,
+    "disk_usage": 0.1
   },
   "resources": {
     "cartunes-app": {
@@ -31,7 +48,10 @@
         "memory": 512,
         "cpu": 500
       },
-      "replica": 1
+      "replica": 1,
+      "song_quality": 2,
+      "preload_song": 5,
+      "cache_size": 300
     }
   },
   "resources_limitations": {
