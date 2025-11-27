@@ -1,8 +1,8 @@
 import http from "k6/http";
 import { check, sleep } from "k6";
 
-// const baseUrl = "http://cartunes-app-acmeair-group6.mycluster-ca-tor-1-835845-04e8c71ff333c8969bc4cbc5a77a70f6-0000.ca-tor.containers.appdomain.cloud"
-const baseUrl = "http://127.0.0.1:8000";
+ const baseUrl = "http://cartunes-app-acmeair-group6.mycluster-ca-tor-1-835845-04e8c71ff333c8969bc4cbc5a77a70f6-0000.ca-tor.containers.appdomain.cloud"
+// const baseUrl = "http://127.0.0.1:8000";
 
 const totalUser = 200;
 const createRoomPercentage = 0.1;
@@ -15,29 +15,29 @@ export const options = {
     creators: {
       executor: "constant-vus",
       vus: Math.round(totalUser * createRoomPercentage),
-      duration: "20s",
+      duration: "10s",
       exec: "createRoom",
     },
     joiners: {
       executor: "constant-vus",
       vus: Math.round(totalUser * joinRoomPercentage),
-      duration: "20s",
+      duration: "40s",
       exec: "joinRoom",
-      startTime: "5s",
+      startTime: "10s",
     },
     adders: {
       executor: "constant-vus",
       vus: Math.round(totalUser * addSongPercentage),
-      duration: "25s",
+      duration: "50s",
       exec: "addSong",
-      startTime: "10s",
+      startTime: "15s",
     },
     playback_ready: {
       executor: "constant-vus",
       vus: Math.round(totalUser * checkPlaybackPercentage),
-      duration: "20s",
+      duration: "60s",
       exec: "checkPlaybackReady",
-      startTime: "15s",
+      startTime: "20s",
     },
   },
 };
@@ -112,9 +112,6 @@ export function addSong(data) {
     return;
   }
 
-  // ⭐ 修改：使用大的 video_id 範圍（1000-11000）避免被預加載
-  // 預加載只會預加載基於 current_song 的 base_num + 1 到 5
-  // 所以用大數字的 id 確保是首次下載
   const videoId = `${10000 + Math.floor(Math.random() * 100000)}_song`;
   const payload = JSON.stringify({
     video_id: videoId,
@@ -138,7 +135,6 @@ export function checkPlaybackReady(data) {
   const { rooms } = data;
   const room = rooms[Math.floor(Math.random() * rooms.length)];
 
-  // 取得 queue 資料
   const queueRes = http.get(`${baseUrl}/api/room/${room}/queue`);
   const queueJson = queueRes.json();
 
@@ -150,10 +146,6 @@ export function checkPlaybackReady(data) {
   const targetVideoId = queueJson.current_song.video_id;
   console.log(`🎧 Checking playback latency for ${targetVideoId} in room ${room}`);
 
-  // ===== 修正：使用新的 video_id 確保是首次下載 =====
-  // 不再使用預先存在的 video_id，而是從新添加的歌曲開始測試
-  
-  // 第一次呼叫 status - 啟動計時器
   let res = http.get(
     `${baseUrl}/api/audio/${targetVideoId}/status?room_id=${room}`
   );
@@ -164,7 +156,6 @@ export function checkPlaybackReady(data) {
   let latency = null;
   let ready = false;
 
-  // 輪詢直到 ready
   for (let i = 0; i < 60; i++) {
     const statusRes = http.get(
       `${baseUrl}/api/audio/${targetVideoId}/status?room_id=${room}`
@@ -196,7 +187,7 @@ export function checkPlaybackReady(data) {
   if (ready && latency !== null) {
     check(latency, {
       "latency recorded": (r) => r > 0,
-      "latency reasonable": (r) => r < 20, // 應該在 3-7 秒之間
+      "latency reasonable": (r) => r < 20,
     });
   }
 
