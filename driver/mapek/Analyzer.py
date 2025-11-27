@@ -2,10 +2,6 @@ import json
 from collections import deque
 import pandas as pd
 
-
-# =======================================================
-#   ANALYZER — QoS (utility-based) + QoE (rule-based)
-# =======================================================
 class Analyzer:
     def __init__(self, analyze_metrics, service_to_use, thresholds, weights):
         self.window_size = 5
@@ -45,10 +41,6 @@ class Analyzer:
         self.cache_hit_ratio_threshold_low = thresholds["cache_hit_ratio"]["low"]
         self.disk_usage_threshold = thresholds["disk_usage"]
 
-
-    # ===============================
-    #   Metric Evaluation
-    # ===============================
     def _evaluate_metrics(self, svc, cpu, memory, latency_avg, latency_max, request_count,
                           request_per_second, request_byte_total, error_rate,
                           available_replicas, disk_usage, cache_hit_ratio,
@@ -103,12 +95,9 @@ class Analyzer:
 
         confidence = len(deques["cpu_deque"]) / self.window_size
         
-        #if confidence < 0.8:
-        #    return None
+        if confidence < 0.8:
+            return None
 
-        # ===============================
-        # QoS Utility
-        # ===============================
         cpu_util = self._normalize_high_is_good(self.cpu_threshold_low, self.cpu_threshold_high, cpu_avg)
         mem_util = self._normalize_high_is_good(self.memory_threshold_low, self.memory_threshold_high, memory_avg)
         latency_util = self._normalize_low_is_good(self.latency_avg_threshold, latency_avg_avg)
@@ -122,9 +111,6 @@ class Analyzer:
         )
         result["qos_overall_utility"] = qos_utility
 
-        # ===============================
-        # Local QoS health
-        # ===============================
         if cpu_avg > self.cpu_threshold_high:
             qos_unhealthy.add("cpu_high")
         elif cpu_avg < self.cpu_threshold_low:
@@ -144,9 +130,6 @@ class Analyzer:
         if available_replicas <= 0:
             qos_unhealthy.add("no_replicas")
 
-        # ===============================
-        # Local QoE health
-        # ===============================
         if avg_playback_latency_avg > self.avg_playback_latency_threshold_high:
             qoe_unhealthy.add("playback_latency_high")
         elif avg_playback_latency_avg < self.avg_playback_latency_threshold_low:
@@ -163,9 +146,6 @@ class Analyzer:
         if disk_usage_avg > self.disk_usage_threshold:
             qoe_unhealthy.add("disk_usage_high")
 
-        # ===============================
-        #   Adaptation flags
-        # ===============================
         if "no_replicas" in qos_unhealthy:
             result["adaptation"].append("self_heal")
 
@@ -246,7 +226,6 @@ class Analyzer:
 
         return analysis_results
     
-    # ===============================
     def _normalize_high_is_good(self, low, high, value):
         return (value - low) / (high - low)
 

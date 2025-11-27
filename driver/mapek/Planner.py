@@ -103,13 +103,11 @@ class Planner:
             new_memory = new_config["requests"]["memory"]
             new_replica = new_config["replica"]
 
-            # 成本
             cpu_cost = abs((new_cpu - old_cpu) / old_cpu) if old_cpu else 0
             mem_cost = abs((new_memory - old_memory) / old_memory) if old_memory else 0
             replica_cost = abs((new_replica - old_replica) / old_replica) if old_replica else 0
             total_cost = 0.4 * cpu_cost + 0.4 * mem_cost + 0.2 * replica_cost
 
-            # 效益（越省 CPU 越好）
             benefit = (cpu_now - new_cpu) / old_cpu if old_cpu else 0
             roi = abs(benefit) / (total_cost + 1e-6)
 
@@ -117,15 +115,9 @@ class Planner:
                 best_roi = roi
                 best = cfg
 
-        # -----------------------------
-        # 4. 更新 new_config
-        # -----------------------------
         if best is not None:
             new_config = best
 
-        # ----------------------------------------------------
-        # 7️⃣ 最終 ROI 判斷
-        # ----------------------------------------------------
         new_cpu = (new_config["requests"]["cpu"] + new_config["limits"]["cpu"]) / 2
         new_memory = (new_config["requests"]["memory"] + new_config["limits"]["memory"]) / 2
         new_replica = new_config["replica"]
