@@ -54,7 +54,7 @@ room_manager = RoomManager(config['maximum_room'])
 ws_manager = ConnectionManager()
 audio_cache_manager = AudioCacheManager(config['max_cache_size_mb'], config['cache_duration_hours'], 
                                         config['audio_quality_kbps'], config['loudness_normalization'],
-                                        song_quality_profiles, "medium")
+                                        song_quality_profiles, "low")
 
 # Dictionary to store the last request time for each room and action, for throttling
 # Used for playback control, skipping, and autoplay toggling
@@ -117,7 +117,7 @@ app.add_middleware(
 async def get_metrics():
     """get current metrics"""
     return {
-        "cache_usage": audio_cache_manager.get_total_cache_usage(),
+        "disk_usage": audio_cache_manager.get_total_cache_usage(),
         "cache_hit_ratio": audio_cache_manager.get_cache_hit_and_miss(),
         "avg_playback_latency": audio_cache_manager.get_playback_latency(),
         "avg_download_time": audio_cache_manager.get_download_time()
@@ -127,7 +127,7 @@ async def get_metrics():
 async def update_config(
     changed_cache_size: Optional[int] = Query(None),
     changed_preload_song: Optional[int] = Query(None),
-    changed_song_quality: Optional[str] = Query(None),
+    changed_song_quality: Optional[int] = Query(None),
 ):
     """
     Dynamically update adaptive configuration.
@@ -160,6 +160,13 @@ async def update_config(
 
     # === 3. Song quality ===
     if changed_song_quality is not None:
+        if changed_song_quality == 1:
+            changed_song_quality = "low"
+        elif changed_song_quality == 2:
+            changed_song_quality = "medium"
+        elif changed_song_quality == 3:
+            changed_song_quality = "high"
+            
         try:
             old_song_quality = audio_cache_manager.get_song_quality()
             audio_cache_manager.set_song_quailty(changed_song_quality)

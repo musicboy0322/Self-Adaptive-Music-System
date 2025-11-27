@@ -268,9 +268,11 @@ class AudioCacheManager:
         logger.info(f"[Adaptive] Cache size adjusted from {old_size}MB to {new_size_mb}MB")
     
     def get_download_time(self):
-        result = list(self.download_time)  # make a copy
-        self.download_time.clear()
-        return result
+        if len(self.download_time) == 0:
+            return 0
+        values = list(self.download_time)
+        self.download_time.clear()         
+        return sum(values) / len(values) 
 
     def set_song_quailty(self, song_quality: str):
         self.song_quality = song_quality
@@ -279,11 +281,11 @@ class AudioCacheManager:
         return self.song_quality
 
     def get_total_cache_usage(self) -> float:
-        """Return current cache usage ratio (0.0 ~ 1.0)."""
+        """Return current cache usage ratio"""
         if self.max_cache_size_mb <= 0:
             return 0.0 
         current = self._get_total_cache_size_mb()
-        return round(current / self.max_cache_size_mb, 4)
+        return round(current / self.max_cache_size_mb, 4) * 100
     
     def get_cache_hit_and_miss(self) -> [int, int]:
         return (self.cache_hits, self.cache_misses)
@@ -294,9 +296,9 @@ class AudioCacheManager:
     def get_playback_latency(self):
         if not hasattr(self, "playback_latencies") or not self.playback_latencies:
             return 0.0
-        result = list(self.playback_latencies)
-        self.playback_latencies.clear()
-        return result
+        values = list(self.playback_latencies)
+        self.playback_latencies.clear()         
+        return sum(values) / len(values) * 1000
 
     def cpu_heavy(self, seconds: float):
         """CPU heavy loop (simulate ffmpeg encode)."""
